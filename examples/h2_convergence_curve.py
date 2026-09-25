@@ -1,7 +1,10 @@
-"""R=0.73 Å에서 VQE의 수렴 궤적을 시각화 (논문 Fig. 3A 재현).
+"""R=0.73 Å에서 H2 VQE의 수렴 궤적 (논문 Fig. 3A 재현).
 
-논문 Fig. 3A와 동일한 스타일: 하나의 axes에 에너지(왼쪽 y축)와
-6개 각도 파라미터(오른쪽 y축)를 함께 표시.
+논문 Fig. 3A와 같은 형태: 하나의 axes에 에너지(왼쪽 y축)와
+6개 각도 파라미터(오른쪽 y축)를 겹쳐 표시.
+
+"Exact diag."는 VQE가 사용하는 것과 동일한 2-qubit 축소 Hamiltonian의
+최소 고윳값이다.
 """
 
 from __future__ import annotations
@@ -30,7 +33,7 @@ def main():
     exact_energy = float(np.linalg.eigvalsh(hamiltonian_matrix(H))[0])
     result = run_vqe(H, seed=42)
 
-    print(f"Converged in {result.n_iterations} iterations")
+    print(f"Converged in {result.n_iterations} function evaluations")
     print(f"Final energy: {result.energy:.6f} Hartree")
     print(f"Exact energy: {exact_energy:.6f} Hartree")
     print(f"Error: {abs(result.energy - exact_energy):.2e} Hartree")
@@ -40,20 +43,18 @@ def main():
 
     fig, ax1 = plt.subplots(figsize=(10, 6))
 
-    # 왼쪽 y축: 에너지 (굵은 강조선)
     color_energy = "black"
     ax1.plot(iterations, result.energy_history,
              "o-", color=color_energy, markersize=3, linewidth=1.8,
              label=r"$\langle H \rangle$", zorder=3)
     ax1.axhline(exact_energy, color=color_energy, linestyle=":",
                 linewidth=1.2, alpha=0.6,
-                label=f"Exact ({exact_energy:.4f} Ha)")
-    ax1.set_xlabel("Iteration")
+                label=f"Exact diag. ({exact_energy:.4f} Ha)")
+    ax1.set_xlabel("Function evaluation")
     ax1.set_ylabel(r"$\langle H \rangle$ (Hartree)", color=color_energy)
     ax1.tick_params(axis="y", labelcolor=color_energy)
     ax1.grid(True, alpha=0.3)
 
-    # 오른쪽 y축: 6개 파라미터
     ax2 = ax1.twinx()
     param_colors = plt.cm.tab10(np.linspace(0, 0.6, 6))
     for i in range(6):
@@ -62,7 +63,6 @@ def main():
                  label=PARAM_LABELS[i])
     ax2.set_ylabel("Parameter value (rad)")
 
-    # legend를 두 axes 합쳐서 하나로
     lines1, labels1 = ax1.get_legend_handles_labels()
     lines2, labels2 = ax2.get_legend_handles_labels()
     ax1.legend(lines1 + lines2, labels1 + labels2,

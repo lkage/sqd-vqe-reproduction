@@ -1,11 +1,16 @@
-"""H2의 4차원 ansatz qudit state.
+"""d차원 ansatz qudit state.
 
-논문 Kim et al., Sci. Adv. 10, eado3472 (2024) 식 (5)를 따른다.
-6개의 각도 파라미터 (theta_0, theta_1, theta_2, omega_0, omega_1, omega_2)
-를 4차원 복소 단위 벡터로 매핑한다.
+논문 Kim et al., Sci. Adv. 10, eado3472 (2024) 식 (5)(4D)와 식 (9)(16D)를
+하나의 일반화된 함수로 구현한다. 두 식은 동일한 이진 트리 구조이며,
+d = 2^k 차원에 대해 2d-2개 각도 파라미터를 사용한다.
 
-자동으로 정규화되는 파라미터화이므로 SciPy 최적화기에 제약 없이 그대로
-파라미터를 넘길 수 있다.
+구조:
+  - 각 내부 노드에서 θ로 cos/sin 분기 (진폭)
+  - sin 방향으로 갈 때만 그 노드의 ω를 phase에 누적
+  - 노드 인덱싱: 크기 m 서브트리가 k에서 시작하면
+    루트=k, 왼쪽 서브트리=k+1, 오른쪽 서브트리=k+m/2
+
+이 파라미터화는 해석적으로 정규화되므로 COBYLA에 제약 없이 전달 가능.
 """
 
 from __future__ import annotations
@@ -14,41 +19,77 @@ import numpy as np
 from numpy.typing import NDArray
 
 
-def h2_ansatz_state(params: NDArray[np.float64]) -> NDArray[np.complex128]:
-    """식 (5)에 따라 6개 각도 파라미터를 4차원 ansatz state로 변환.
+def num_params_for_dim(dim: int) -> int:
+    """d차원 ansatz가 요구하는 파라미터 개수 (2d-2).
 
-    params: shape (6,) 실수 배열.
-        params[0] = theta_0
-        params[1] = theta_1
-        params[2] = theta_2
-        params[3] = omega_0
-        params[4] = omega_1
-        params[5] = omega_2
-
-    반환: shape (4,) complex128 배열. ‖psi‖ = 1 보장됨 (해석적으로).
+    d=4 → 6 (H2, 식 5), d=16 → 30 (LiH, 식 9).
     """
-    if params.shape != (6,):
-        raise ValueError(f"params must have shape (6,), got {params.shape}")
+    if dim < 2 or (dim & (dim - 1)) != 0:
+        raise ValueError(f"dim must be a power of 2 and >= 2, got {dim}")
+    return 2 * dim - 2
 
-    theta_0, theta_1, theta_2, omega_0, omega_1, omega_2 = params
 
-    c0 = np.cos(theta_0 / 2)
-    s0 = np.sin(theta_0 / 2)
-    c1 = np.cos(theta_1 / 2)
-    s1 = np.sin(theta_1 / 2)
-    c2 = np.cos(theta_2 / 2)
-    s2 = np.sin(theta_2 / 2)
+def qudit_ansatz_state(
+    params: NDArray[np.float64],
+    dim: int,
+) -> NDArray[np.complex128]:
+    """2d-2개 각도 파라미터를 d차원 복소 단위 벡터로 변환.
 
-    psi = np.array([
-        c0 * c1,
-        c0 * s1 * np.exp(1j * omega_1),
-        s0 * c2 * np.exp(1j * omega_0),
-        s0 * s2 * np.exp(1j * (omega_0 + omega_2)),
-    ], dtype=np.complex128)
+    params: shape (2*dim-2,) 실수 배열.
+        params[:dim-1]  = theta_0 ... theta_{dim-2}  (elevation)
+        params[dim-1:]  = omega_0 ... omega_{dim-2}  (azimuthal)
 
+    반환: shape (dim,) complex128. ‖psi‖ = 1 (해석적으로 보장).
+    """
+    expected = num_params_for_dim(dim)
+    if params.shape != (expected,):
+        raise ValueError(
+            f"params must have shape ({expected},) for dim={dim}, "
+            f"got {params.shape}"
+        )
+
+    n_nodes = dim - 1
+    theta = params[:n_nodes]
+    omega = params[n_nodes:]
+
+    psi = np.zeros(dim, dtype=np.complex128)
+
+    def descend(node: int, size: int, leaf: int,
+                amplitude: float, phase: float) -> None:
+        """트리를 내려가며 각 leaf에 진폭과 위상을 기록.
+
+        node: theta/omega 인덱스
+        size: 이 서브트리의 leaf 개수
+        leaf: 이 서브트리의 첫 leaf 인덱스
+        """
+        if size == 1:
+            psi[leaf] = amplitude * np.exp(1j * phase)
+            return
+
+        half = size // 2
+        c = np.cos(theta[node] / 2)
+        s = np.sin(theta[node] / 2)
+
+        # 왼쪽(cos): phase 변화 없음
+        descend(node + 1, half, leaf, amplitude * c, phase)
+        # 오른쪽(sin): 이 노드의 omega를 phase에 누적
+        descend(node + half, half, leaf + half,
+                amplitude * s, phase + omega[node])
+
+    descend(0, dim, 0, 1.0, 0.0)
     return psi
 
 
+def h2_ansatz_state(params: NDArray[np.float64]) -> NDArray[np.complex128]:
+    """H2용 4차원 ansatz (논문 식 5). 6개 파라미터."""
+    return qudit_ansatz_state(params, dim=4)
+
+
+def lih_ansatz_state(params: NDArray[np.float64]) -> NDArray[np.complex128]:
+    """LiH용 16차원 ansatz (논문 식 9). 30개 파라미터."""
+    return qudit_ansatz_state(params, dim=16)
+
+
 def num_params() -> int:
-    """이 ansatz가 요구하는 파라미터 개수. (H2: 6)"""
-    return 6
+    """(하위 호환) H2 ansatz의 파라미터 개수."""
+    return num_params_for_dim(4)

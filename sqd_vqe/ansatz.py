@@ -1,16 +1,19 @@
 """d차원 ansatz qudit state.
 
 논문 Kim et al., Sci. Adv. 10, eado3472 (2024) 식 (5)(4D)와 식 (9)(16D)를
-하나의 일반화된 함수로 구현한다. 두 식은 동일한 이진 트리 구조이며,
-d = 2^k 차원에 대해 2d-2개 각도 파라미터를 사용한다.
+하나의 일반화된 함수로 구현한다. d = 2^k 차원에 대해 2d-2개 각도 파라미터를
+사용한다.
 
-구조:
+구조 (두 식이 동일한 이진 트리):
   - 각 내부 노드에서 θ로 cos/sin 분기 (진폭)
   - sin 방향으로 갈 때만 그 노드의 ω를 phase에 누적
   - 노드 인덱싱: 크기 m 서브트리가 k에서 시작하면
     루트=k, 왼쪽 서브트리=k+1, 오른쪽 서브트리=k+m/2
 
-이 파라미터화는 해석적으로 정규화되므로 COBYLA에 제약 없이 전달 가능.
+이 파라미터화는 해석적으로 정규화되므로 COBYLA에 제약 없이 전달 가능하다.
+
+참고: 논문 식 (9)의 α₆, α₁₃, α₁₄에서 ω 아래첨자 n이 누락된 표기 오류가
+있으나, 같은 파라미터를 가리킨다.
 """
 
 from __future__ import annotations
@@ -70,9 +73,7 @@ def qudit_ansatz_state(
         c = np.cos(theta[node] / 2)
         s = np.sin(theta[node] / 2)
 
-        # 왼쪽(cos): phase 변화 없음
         descend(node + 1, half, leaf, amplitude * c, phase)
-        # 오른쪽(sin): 이 노드의 omega를 phase에 누적
         descend(node + half, half, leaf + half,
                 amplitude * s, phase + omega[node])
 
@@ -90,6 +91,6 @@ def lih_ansatz_state(params: NDArray[np.float64]) -> NDArray[np.complex128]:
     return qudit_ansatz_state(params, dim=16)
 
 
-def num_params() -> int:
-    """(하위 호환) H2 ansatz의 파라미터 개수."""
-    return num_params_for_dim(4)
+# 편의 상수
+H2_NUM_PARAMS = num_params_for_dim(4)    # 6
+LIH_NUM_PARAMS = num_params_for_dim(16)  # 30

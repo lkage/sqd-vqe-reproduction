@@ -1,11 +1,24 @@
-"""H2 Hamiltonian을 ParityMapper + 2-qubit reduction으로 생성.
+"""[3주차 학습 흔적] ParityMapper + 2-qubit reduction으로 H2 Hamiltonian 확인.
 
-JordanWigner 버전(hello_qiskit.py)과 비교하여 qubit 수와
-Pauli term 구성이 어떻게 달라지는지 확인.
+JordanWigner(hello_qiskit.py)와 달리 2-qubit, 5 Pauli term이 나와
+논문 Table S1과 형태가 일치한다.
+
+상수항을 identity에 더한 버전도 함께 출력해서, 논문 Table S1의 II 계수가
+nuclear repulsion을 포함한 값임을 확인한다.
 """
 
 from qiskit_nature.second_q.drivers import PySCFDriver
 from qiskit_nature.second_q.mappers import ParityMapper
+
+
+# 논문 Table S1, R = 0.73 Å
+PAPER_S1_073 = {
+    "II": -0.326386,
+    "IZ":  0.401061,
+    "ZI": -0.401061,
+    "ZZ": -0.011314,
+    "XX":  0.180653,
+}
 
 
 def main():
@@ -18,7 +31,6 @@ def main():
     fermionic_op = problem.hamiltonian.second_q_op()
     nuclear_repulsion = problem.hamiltonian.nuclear_repulsion_energy
 
-    # ParityMapper에 num_particles를 전달하면 2-qubit reduction이 자동 적용됨
     mapper = ParityMapper(num_particles=problem.num_particles)
     qubit_op = mapper.map(fermionic_op)
 
@@ -31,14 +43,16 @@ def main():
     for pauli, coeff in zip(qubit_op.paulis, qubit_op.coeffs):
         print(f"  {coeff.real:+.6f}  {pauli}")
 
-    # II 항에 nuclear repulsion 더한 'total H' 형태도 같이 출력
     print("\nWith nuclear repulsion added to II coefficient:")
+    print(f"  {'Pauli':<6} {'qiskit':>12} {'paper':>12}")
     for pauli, coeff in zip(qubit_op.paulis, qubit_op.coeffs):
         c = coeff.real
         label = str(pauli)
         if label == "II":
             c += nuclear_repulsion
-        print(f"  {c:+.6f}  {label}")
+        expected = PAPER_S1_073.get(label)
+        exp_str = f"{expected:>12.6f}" if expected is not None else " " * 12
+        print(f"  {label:<6} {c:>12.6f} {exp_str}")
 
 
 if __name__ == "__main__":

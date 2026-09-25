@@ -1,7 +1,8 @@
-"""VQE COBYLA 최적화의 수렴 검증.
+"""H2 VQE COBYLA 최적화 검증 (논문 Fig. 3).
 
-논문 Fig. 3 재현을 위한 핵심 단계. 단일 R에서 ground state energy로
-수렴하는지 확인.
+단일 실행과 multi-start의 정확도를 구분해서 기록한다.
+COBYLA tol=0.01(논문 명시값)에서 단일 실행은 간혹 chemical accuracy를
+근소하게 넘긴다.
 """
 
 import math
@@ -10,48 +11,39 @@ import numpy as np
 import pytest
 
 from sqd_vqe.expectation import hamiltonian_matrix
-from sqd_vqe.hamiltonian import build_h2_hamiltonian
+from sqd_vqe.hamiltonian import get_h2_hamiltonian
 from sqd_vqe.vqe import run_vqe, run_vqe_multistart
 
 
-# Chemical accuracy: 1 kcal/mol ≈ 1.6 mHa
-# 논문도 이 기준으로 정확도 평가 (Fig. 3B의 "Chemical Accuracy" 라인)
-CHEMICAL_ACCURACY = 1.6e-3  # Hartree
+# Chemical accuracy: 4 kJ/mol ≈ 1.6 mHa. 논문의 Fig. 3B 기준선
+CHEMICAL_ACCURACY = 1.6e-3
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def h2_at_bonding_length():
-    """R=0.73 Å에서의 H2 Hamiltonian + 정확한 ground state energy."""
-    H = build_h2_hamiltonian(distance=0.73)
-    M = hamiltonian_matrix(H)
-    exact_energy = float(np.linalg.eigvalsh(M)[0])
-    return H, exact_energy
+    """R=0.73 Å의 H2 Hamiltonian + 정확한 ground state energy."""
+    H = get_h2_hamiltonian(distance=0.73)
+    exact = float(np.linalg.eigvalsh(hamiltonian_matrix(H))[0])
+    return H, exact
 
 
 def test_vqe_converges_to_ground_state(h2_at_bonding_length):
-    """VQE가 R=0.73 Å에서 chemical accuracy 이내로 수렴.
-
-    이게 통과해야 4주차 핵심 목표 달성. Fig. 3A의 정성적 거동 재현.
-    """
-    H, exact_energy = h2_at_bonding_length
+    """R=0.73 Å에서 chemical accuracy 이내로 수렴."""
+    H, exact = h2_at_bonding_length
     result = run_vqe(H, seed=42)
 
-    error = abs(result.energy - exact_energy)
+    error = abs(result.energy - exact)
     assert error < CHEMICAL_ACCURACY, (
-        f"VQE energy: {result.energy:.6f}, "
-        f"exact: {exact_energy:.6f}, "
-        f"error: {error:.6f} Hartree "
-        f"(chemical accuracy = {CHEMICAL_ACCURACY})"
+        f"VQE energy: {result.energy:.6f}, exact: {exact:.6f}, "
+        f"error: {error:.6f} Hartree"
     )
 
 
 def test_vqe_respects_variational_principle(h2_at_bonding_length):
-    """최적화 결과가 정확한 ground state energy보다 작을 수 없다."""
-    H, exact_energy = h2_at_bonding_length
+    """결과가 정확한 ground state energy보다 작을 수 없다."""
+    H, exact = h2_at_bonding_length
     result = run_vqe(H, seed=42)
-
-    # 수치 오차 여유 1e-9
-    assert result.energy >= exact_energy - 1e-9
+    assert result.energy >= exact - 1e-9
 
 
 def test_vqe_is_reproducible(h2_at_bonding_length):
@@ -70,7 +62,7 @@ def test_vqe_single_run_reaches_near_chemical_accuracy(
     """단일 실행은 2 mHa 이내에 도달한다.
 
     COBYLA tol=0.01(논문 명시값)에서 단일 실행의 실측 한계.
-    chemical accuracy(1.6 mHa)를 항상 만족하지는 않는다.
+    chemical accuracy(1.6 mHa)를 항상 만족하지는 않는다 —
     seed=0에서 실측 오차 1.63 mHa.
     """
     H, exact = h2_at_bonding_length
@@ -78,7 +70,7 @@ def test_vqe_single_run_reaches_near_chemical_accuracy(
     error = abs(result.energy - exact)
     assert error < 2.0e-3, (
         f"seed={seed}: error={error:.6f} Hartree, "
-        f"iterations={result.n_iterations}"
+        f"evaluations={result.n_iterations}"
     )
 
 
@@ -107,11 +99,11 @@ def test_multistart_improves_over_single_run(h2_at_bonding_length):
 
 
 def test_vqe_history_consistent(h2_at_bonding_length):
-    """history가 결과와 일관성 있게 기록됨.
+    """history가 결과와 일관성 있게 기록된다.
 
-    COBYLA는 trust region 탐색 과정에서 best가 아닌 점도 평가하므로
-    energy_history[-1] != result.energy일 수 있다.
-    대신 result.energy는 정의상 평가된 모든 값 중 최소여야 한다.
+    COBYLA는 trust region 탐색 중 best가 아닌 점도 평가하므로
+    energy_history[-1] != result.energy일 수 있다. 대신 result.energy는
+    정의상 평가된 모든 값 중 최소다.
     """
     H, _ = h2_at_bonding_length
     result = run_vqe(H, seed=42)
@@ -119,24 +111,20 @@ def test_vqe_history_consistent(h2_at_bonding_length):
     assert len(result.energy_history) == result.n_iterations
     assert len(result.param_history) == result.n_iterations
 
-    # result.energy는 평가된 모든 에너지 중 최소
     best_in_history = min(result.energy_history)
     assert math.isclose(best_in_history, result.energy, abs_tol=1e-9), (
-        f"result.energy={result.energy}, "
-        f"min(history)={best_in_history}"
+        f"result.energy={result.energy}, min(history)={best_in_history}"
     )
 
 
-def test_vqe_iteration_count_reasonable(h2_at_bonding_length):
-    """수렴 iteration 수가 합리적 범위.
+def test_vqe_evaluation_count_reasonable(h2_at_bonding_length):
+    """함수 평가 횟수가 합리적 범위.
 
-    논문: H2 평균 48 iteration. 우리 구현이 한 자릿수~수백 정도면 정상.
-    수천 iteration 가면 뭔가 잘못된 것.
+    실측 ~113회. 수천 회로 가면 종료 조건에 문제가 있는 것.
+    논문의 실험 iteration(48±6.8)과는 다른 단위이므로 직접 비교하지 않는다.
     """
     H, _ = h2_at_bonding_length
     result = run_vqe(H, seed=42)
-
-    assert 5 < result.n_iterations < 500, (
-        f"Iteration count: {result.n_iterations} "
-        f"(논문 H2 평균: 48)"
+    assert 5 < result.n_iterations < 1000, (
+        f"Evaluation count: {result.n_iterations}"
     )

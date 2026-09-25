@@ -1,10 +1,14 @@
-"""두 실행에서 나온 LiH 계수를 비트 단위로 비교.
+"""[5주차 진단] 두 실행에서 나온 LiH 계수를 비트 단위로 비교.
 
-어느 Pauli 항이 몇 ULP 다른지 찾는다.
+determinism_check.py를 여러 번 실행해 results/determinism/에 두 종류
+이상의 JSON이 모인 뒤 사용한다. 어느 Pauli 항이 몇 ULP 다른지 보여준다.
+
+실측 결과 (5주차):
+  100개 중 16개 항이 다름. 최대 152 ULP (IIXX, IIYY).
+  전부 두 큐비트에만 작용하는 항.
 """
 
 import json
-import math
 from pathlib import Path
 
 import numpy as np
@@ -23,6 +27,10 @@ def main():
     files = sorted(Path("results/determinism").glob("lih_*.json"))
     if len(files) < 2:
         print(f"비교하려면 2개 이상 필요. 현재 {len(files)}개.")
+        print("determinism_check.py를 여러 번 실행하세요:")
+        print("  for i in $(seq 1 10); do "
+              "uv run python examples/diagnostics/determinism_check.py "
+              "> /dev/null; done")
         return
 
     print(f"비교: {files[0].name}  vs  {files[1].name}\n")

@@ -1,10 +1,19 @@
 """H2 potential energy curve (논문 Fig. 3B 재현).
 
 논문 Figure S10의 21개 R 값에서 multi-start VQE를 실행한다.
-결과를 results/h2_pec.csv로도 저장한다 (7주차 C++ cross-check용).
+결과를 results/h2_pec.csv로도 저장한다 (C++ cross-validation 입력).
+
+Fig. 3A가 "한 지점에서 어떻게 수렴하는가"를 보여준다면, 이 그림은
+"모든 거리에서 얼마나 정확한가"를 보여준다. 위 panel은 곡선 모양을,
+아래 panel은 오차를 log scale로 본다.
+
+오차를 log scale로 그리는 이유: 오차가 R에 따라 1e-6에서 1e-3까지
+세 자릿수를 오간다. 선형 축이면 큰 값 몇 개만 보이고 나머지는 바닥에
+붙어 버린다.
 
 "Exact diagonalization"은 VQE가 최적화하는 것과 동일한 2-qubit 축소
-Hamiltonian의 최소 고윳값이다. 실험 참값이나 full CI가 아니다.
+Hamiltonian의 최소 고윳값이다. 실험 참값이나 full CI가 아니다. 따라서
+아래 panel의 ΔE가 재는 것은 COBYLA의 탐색 성능 하나뿐이다.
 """
 
 from __future__ import annotations
@@ -17,7 +26,10 @@ import matplotlib.pyplot as plt
 from sqd_vqe.sweep import PAPER_H2_DISTANCES, sweep_h2_distances
 
 
+# Chemical accuracy: 약 1 kcal/mol. 양자화학에서 "실용적으로 충분히 정확"의
+# 통상적 기준이고, 논문 Fig. 3B에도 이 선이 그려져 있다.
 CHEMICAL_ACCURACY = 1.6e-3  # Hartree
+# 6차원이라 3회면 충분하다. LiH(30차원)는 5회가 필요했다.
 N_RESTARTS = 3
 
 
@@ -31,6 +43,9 @@ def main():
     out_dir = Path("results")
     out_dir.mkdir(exist_ok=True)
 
+    # --- CSV 저장 -------------------------------------------------------
+    # 그림은 눈으로 보는 것이고, CSV는 다른 코드가 읽는 것이다. C++
+    # cross-validation이 이 파일의 (R, E) 쌍을 기준으로 삼는다.
     csv_path = out_dir / "h2_pec.csv"
     with csv_path.open("w", newline="") as f:
         writer = csv.writer(f)
@@ -45,15 +60,21 @@ def main():
             )
     print(f"\nSaved results to {csv_path}")
 
+    # --- 요약 통계 ------------------------------------------------------
     errors = [p.error for p in points]
     evals = [p.n_iterations for p in points]
     n_ok = sum(e < CHEMICAL_ACCURACY for e in errors)
 
+    # max와 mean을 함께 본다. mean만 보면 소수의 큰 실패가 묻히고,
+    # max만 보면 전반적인 정확도를 알 수 없다.
     print(f"\nMax error:  {max(errors):.2e} Hartree")
     print(f"Mean error: {sum(errors)/len(errors):.2e} Hartree")
     print(f"Within chemical accuracy: {n_ok}/{len(errors)}")
     print(f"Evaluations: mean={sum(evals)/len(evals):.0f}, max={max(evals)}")
 
+    # --- 플롯 -----------------------------------------------------------
+    # 위/아래 높이비 3:1. 곡선이 주인공이고 오차는 보조 정보다.
+    # sharex=True로 두 panel의 x축을 묶어 두면 같은 R이 세로로 정렬된다.
     fig, (ax1, ax2) = plt.subplots(
         2, 1, figsize=(8, 7),
         gridspec_kw={"height_ratios": [3, 1]},
@@ -62,10 +83,13 @@ def main():
 
     distances = [p.distance for p in points]
 
+    # 위 panel: 곡선(exact)은 선으로, VQE는 점으로. 점이 선 위에 얹히는
+    # 그림이 되어야 "재현했다"가 시각적으로 읽힌다.
     ax1.plot(distances, [p.exact_energy for p in points],
              "k-", label="Exact diagonalization", linewidth=1.5)
     ax1.plot(distances, [p.vqe_energy for p in points],
              "o", color="tab:red", label="VQE", markersize=6)
+    # 결합 길이를 수직선으로 표시. 곡선의 최소점이 여기 있어야 맞다.
     ax1.axvline(0.73, color="gray", linestyle="--", linewidth=1,
                 alpha=0.6, label="Bonding length (0.73 Å)")
     ax1.set_ylabel(r"$\langle H \rangle_{\min}$ (Hartree)")
@@ -73,12 +97,17 @@ def main():
     ax1.legend()
     ax1.grid(True, alpha=0.3)
 
+    # 아래 panel: 오차. semilogy로 세 자릿수 범위를 모두 보이게 한다.
     ax2.semilogy(distances, errors, "o-", color="tab:red", markersize=4)
+    # 기준선 라벨을 mHa로 적는다. "1.6e-03"보다 "1.6 mHa"가 읽기 쉽고,
+    # %.0e 포맷이 1.6e-3을 2e-03으로 반올림해 버리는 문제도 피한다.
     ax2.axhline(CHEMICAL_ACCURACY, color="blue", linestyle="--",
                 label=f"Chemical accuracy ({CHEMICAL_ACCURACY*1000:.1f} mHa)")
     ax2.set_xlabel(r"Interatomic distance $R$ (Å)")
     ax2.set_ylabel(r"$|E_{\rm VQE} - E_{\rm exact}|$ (Ha)")
     ax2.legend()
+    # which="both"로 minor grid까지 켠다. log scale에서는 minor 눈금이
+    # 있어야 자릿수 사이의 위치를 읽을 수 있다.
     ax2.grid(True, alpha=0.3, which="both")
 
     plt.tight_layout()

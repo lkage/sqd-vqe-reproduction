@@ -8,3 +8,5 @@ __pycache__/
 build/
 dist/
 .DS_Store
+results/*_cpp.png
+results/*_cpp.csv

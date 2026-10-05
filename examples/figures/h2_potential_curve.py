@@ -14,16 +14,22 @@ Fig. 3A가 "한 지점에서 어떻게 수렴하는가"를 보여준다면, 이 
 "Exact diagonalization"은 VQE가 최적화하는 것과 동일한 2-qubit 축소
 Hamiltonian의 최소 고윳값이다. 실험 참값이나 full CI가 아니다. 따라서
 아래 panel의 ΔE가 재는 것은 COBYLA의 탐색 성능 하나뿐이다.
+
+사용법:
+    uv run python examples/figures/h2_potential_curve.py
+    PYTHONPATH=<cpp_repo>/build-py/python \
+      uv run python examples/figures/h2_potential_curve.py --kernel cpp
 """
 
 from __future__ import annotations
 
+import argparse
 import csv
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 
-from sqd_vqe.sweep import PAPER_H2_DISTANCES, sweep_h2_distances
+from sqd_vqe.sweep import KERNELS, PAPER_H2_DISTANCES, sweep_h2_distances
 
 
 # Chemical accuracy: 약 1 kcal/mol. 양자화학에서 "실용적으로 충분히 정확"의
@@ -34,10 +40,25 @@ N_RESTARTS = 3
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--kernel", choices=sorted(KERNELS), default="numpy",
+        help="energy evaluation kernel (default: numpy). "
+             "cpp requires the qudit_simulator module on PYTHONPATH.",
+    )
+    args = parser.parse_args()
+
+    # 파일명과 제목을 커널별로 분리한다. 같은 이름을 쓰면 나중에 돌린 쪽이
+    # 앞서 만든 그림과 CSV를 덮어쓴다. CSV는 C++ cross-validation의 입력이
+    # 되므로 특히 덮어쓰면 안 된다.
+    suffix = "" if args.kernel == "numpy" else f"_{args.kernel}"
+    kernel_note = "" if args.kernel == "numpy" else ", C++ kernel"
+
     print(f"Running H2 VQE for {len(PAPER_H2_DISTANCES)} distances "
-          f"(multi-start {N_RESTARTS}회)...")
+          f"(multi-start {N_RESTARTS}회, kernel: {args.kernel})...")
     points = sweep_h2_distances(
-        PAPER_H2_DISTANCES, n_restarts=N_RESTARTS, seed=42, verbose=True
+        PAPER_H2_DISTANCES, n_restarts=N_RESTARTS, seed=42,
+        verbose=True, kernel=args.kernel,
     )
 
     out_dir = Path("results")
@@ -46,7 +67,7 @@ def main():
     # --- CSV 저장 -------------------------------------------------------
     # 그림은 눈으로 보는 것이고, CSV는 다른 코드가 읽는 것이다. C++
     # cross-validation이 이 파일의 (R, E) 쌍을 기준으로 삼는다.
-    csv_path = out_dir / "h2_pec.csv"
+    csv_path = out_dir / f"h2_pec{suffix}.csv"
     with csv_path.open("w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(
@@ -93,7 +114,8 @@ def main():
     ax1.axvline(0.73, color="gray", linestyle="--", linewidth=1,
                 alpha=0.6, label="Bonding length (0.73 Å)")
     ax1.set_ylabel(r"$\langle H \rangle_{\min}$ (Hartree)")
-    ax1.set_title(r"$H_2$ Potential Energy Curve (Fig. 3B reproduction)")
+    ax1.set_title(r"$H_2$ Potential Energy Curve "
+                  f"(Fig. 3B reproduction{kernel_note})")
     ax1.legend()
     ax1.grid(True, alpha=0.3)
 
@@ -111,7 +133,7 @@ def main():
     ax2.grid(True, alpha=0.3, which="both")
 
     plt.tight_layout()
-    plot_path = out_dir / "h2_pec.png"
+    plot_path = out_dir / f"h2_pec{suffix}.png"
     plt.savefig(plot_path, dpi=150)
     print(f"Saved plot to {plot_path}")
 

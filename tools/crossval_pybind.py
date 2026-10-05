@@ -22,7 +22,7 @@ hamiltonian_matrix()는 PauliHamiltonian을 받는데, 그 객체는 분자 행�
 vs_matvec 열은 엉뚱한 것을 재게 된다.
 
 사용법:
-    PYTHONPATH=<cpp_repo>/build/python uv run python tools/crossval_pybind.py
+    PYTHONPATH=<cpp_repo>/build-py/python uv run python tools/crossval_pybind.py
 """
 
 from __future__ import annotations

@@ -221,7 +221,7 @@ def _make_cpp_evaluator(hamiltonian: PauliHamiltonian) -> EnergyFn:
         raise ImportError(
             "qudit_simulator module not found. Build it in the "
             "qudit-simulator-cpp repo with -DQUDIT_BUILD_PYTHON=ON and put "
-            "build/python on PYTHONPATH."
+            "build-py/python on PYTHONPATH."
         ) from exc
 
     # 생성자 안에서 Pauli 행렬 빌드와 조밀 행렬 누적이 일어난다. 여기서

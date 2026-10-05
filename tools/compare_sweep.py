@@ -29,7 +29,7 @@ COBYLA는 파라미터 공간에서 tol=0.01에 멈추므로 각 각도가 그 �
 나오면 두 실행이 서로 다른 basin에 안착했다는 신호이기 때문이다.
 
 사용법:
-    PYTHONPATH=<cpp_repo>/build/python uv run python tools/compare_sweep.py
+    PYTHONPATH=<cpp_repo>/build-py/python uv run python tools/compare_sweep.py
     PYTHONPATH=... uv run python tools/compare_sweep.py --mode multistart
 """
 

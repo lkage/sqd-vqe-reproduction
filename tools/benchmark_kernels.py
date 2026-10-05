@@ -28,7 +28,7 @@
 수치는 전체 실행 시간 중 커널이 실제로 차지하는 비중을 보여준다.
 
 사용법:
-    PYTHONPATH=<cpp_repo>/build/python uv run python tools/benchmark_kernels.py
+    PYTHONPATH=<cpp_repo>/build-py/python uv run python tools/benchmark_kernels.py
 """
 
 from __future__ import annotations

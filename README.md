@@ -84,7 +84,7 @@ H2 테스트가 그 일반화의 검증 장치 역할을 합니다.
 
 ## C++ 커널 (선택)
 
-`sqd_vqe.vqe`는 에너지 평가 경로를 둘 제공합니다.
+에너지 평가 경로가 둘입니다.
 
 | 함수 | 평가 경로 |
 |---|---|
@@ -95,26 +95,44 @@ H2 테스트가 그 일반화의 검증 장치 역할을 합니다.
 주입받으므로, 두 경로를 비교할 때 루프 차이를 의심할 필요가 없습니다.
 
 C++ 모듈은 **선택적 의존성**입니다. `qudit_simulator`가 없어도 이 레포는
-그대로 동작하고 테스트도 전부 통과합니다. `import`를 함수 안에서 하는 이유가
-그것입니다.
+그대로 동작하고 92개 테스트가 전부 통과합니다. `import`를 함수 안에서 하는
+이유가 그것입니다. 모듈이 있으면 C++ 경로를 검증하는 19개가 추가됩니다.
 
-두 커널이 서로 비트 단위로 일치하리라 기대하면 안 됩니다. 목적 함수가
+### 교차 검증
+
+| 도구 | 하는 일 |
+|---|---|
+| `tools/dump_pauli.py` | Qiskit의 Pauli 행렬을 덤프. endian 컨벤션 기준 데이터 |
+| `tools/dump_crossval_states.py` | 55개 기준 state와 Hamiltonian 텍스트 생성 |
+| `tools/crossval_pybind.py` | C++ 모듈을 Python 두 경로와 대조 |
+| `tools/compare_sweep.py` | 두 커널로 스윕 전체를 돌려 비교 |
+| `tools/benchmark_kernels.py` | 커널 마이크로 벤치마크 |
+
+고정된 55개 state에서는 두 커널이 자릿수까지 일치합니다. numpy ↔ Eigen
+경계에서 값 손실이 없다는 뜻입니다.
+
+반면 VQE 루프 전체는 비트 단위로 같으리라 기대하면 안 됩니다. 목적 함수가
 1~4 ULP 다르고 COBYLA는 값을 비교해 움직이므로, 두 후보의 차이가 그 폭
 안으로 좁혀지는 지점에서 비교가 뒤집히면 궤적이 갈립니다. 각 커널을 서로가
 아니라 exact 값과 비교하는 것이 맞습니다.
+
+기준 state 생성에는 분자 Hamiltonian만으로는 부족합니다. 분자 Hamiltonian은
+실수 대칭 행렬이고, 실수 H에서는 켤레를 어느 쪽에 걸든 기댓값이 같습니다 —
+복소 state를 넣어도 마찬가지입니다. 그래서 Y가 홀수인 항을 더한 합성
+Hamiltonian을 함께 둡니다. 그쪽에서는 두 값이 갈리므로 켤레 방향이 검증됩니다.
 
 ## 환경 구성
 
 ```bash
 uv sync
 uv pip install -e .
-uv run pytest tests/ -v    # 92개 테스트
+uv run pytest tests/ -v    # 92개 (C++ 모듈이 있으면 +19개)
 ```
 
 Python 3.11과 `uv`가 필요합니다. WSL2 Ubuntu 24.04에서 개발했습니다.
 
 C++ 커널까지 쓰려면 `qudit-simulator-cpp`를 `-DQUDIT_BUILD_PYTHON=ON`으로
-빌드하고 `build/python`을 `PYTHONPATH`에 넣습니다.
+빌드하고 `build-py/python`을 `PYTHONPATH`에 넣습니다.
 
 ## 그림 재현
 
@@ -127,6 +145,19 @@ uv run python examples/figures/lih_potential_curve.py     # Fig. 4B
 
 LiH 스윕은 5분 정도 걸리고 나머지는 더 빠릅니다.
 
+네 스크립트 모두 `--kernel cpp`를 받습니다. 같은 그림을 C++ 커널로 다시
+그리며, 결과는 `*_cpp.png`와 `*_cpp.csv`로 따로 저장되어 기존 파일을
+덮어쓰지 않습니다.
+
+```bash
+PYTHONPATH=<cpp_repo>/build-py/python \
+  uv run python examples/figures/h2_potential_curve.py --kernel cpp
+```
+
+H2 수렴 곡선은 두 커널이 픽셀 단위로 같은 그림을 냅니다 — 6차원에
+87회 평가라 ULP 차이가 비교를 뒤집을 만큼 쌓이지 않습니다. LiH는 30차원에
+수천 회 평가라 궤적이 갈릴 수 있습니다.
+
 ## 디렉토리 구조
 
 ```
@@ -137,13 +168,8 @@ sqd_vqe/
   vqe.py           COBYLA 루프. 단일 실행, multi-start, C++ 경로
   sweep.py         원자간 거리 스윕
   data/            고정된 Hamiltonian (아래 주의 참고)
-tests/             92개 테스트
-tools/
-  dump_pauli.py              Qiskit Pauli 행렬 덤프 (endian 기준 데이터)
-  dump_crossval_states.py    교차 검증용 state + Hamiltonian 텍스트 생성
-  crossval_pybind.py         C++ 모듈을 Python 두 경로와 대조
-  compare_sweep.py           두 커널로 스윕 전체 실행 후 비교
-  benchmark_kernels.py       커널 마이크로 벤치마크
+tests/             92개 + C++ 모듈이 있으면 19개
+tools/             교차 검증과 벤치마크 (위 표 참고)
 examples/
   figures/         논문 그림 4개
   exploration/     3주차 학습 스크립트

@@ -6,6 +6,9 @@
 R마다 Hamiltonian이 새로 필요하다는 점이 핵심이다. 원자 간 거리가 바뀌면
 one/two-electron 적분이 전부 바뀌므로 Pauli 계수도 전부 바뀐다. ansatz와
 옵티마이저는 그대로지만 목적 함수가 매 지점 달라진다.
+
+에너지 평가 커널은 kernel 인자로 고른다. 두 커널 모두 chemical accuracy
+안에 들어오므로 곡선 자체는 거의 같고, 오차 수준에서만 미세하게 다르다.
 """
 
 from __future__ import annotations
@@ -23,7 +26,7 @@ from sqd_vqe.ansatz import (
 )
 from sqd_vqe.expectation import hamiltonian_matrix
 from sqd_vqe.hamiltonian import get_h2_hamiltonian, get_lih_hamiltonian
-from sqd_vqe.vqe import run_vqe_multistart
+from sqd_vqe.vqe import run_vqe_multistart, run_vqe_multistart_cpp
 
 
 # 논문 Figure S10의 H2 21개 R 값 (단위 Å).
@@ -40,6 +43,16 @@ PAPER_LIH_DISTANCES: NDArray[np.float64] = np.array([
     0.1, 0.5, 0.8, 1.1, 1.3, 1.4, 1.5,
     1.55, 1.6, 1.7, 1.8, 2.2, 2.8, 3.4,
 ])
+
+#: 커널 이름 → multi-start 실행 함수.
+#: 문자열로 고르게 해 두면 CLI 인자를 그대로 넘길 수 있고, 호출부가
+#: run_vqe_multistart_cpp를 직접 import할 필요도 없다. cpp를 고르지
+#: 않는 한 qudit_simulator는 로드되지 않는다 — vqe.py가 import를
+#: 함수 안에서 하기 때문이다.
+KERNELS = {
+    "numpy": run_vqe_multistart,
+    "cpp": run_vqe_multistart_cpp,
+}
 
 
 @dataclass
@@ -75,12 +88,22 @@ def _sweep(
     n_restarts: int,
     seed: int,
     verbose: bool,
+    kernel: str,
 ) -> list[PECPoint]:
     """R 스윕의 공통 루프.
 
     H2와 LiH가 분자 정보(Hamiltonian 생성 함수, ansatz, 파라미터 개수,
     restart 횟수)만 다르고 절차는 같으므로 하나로 묶는다.
     """
+    # 스윕을 시작하기 전에 커널 이름을 검증한다. 오타가 있으면 LiH 기준
+    # 5분을 기다린 뒤가 아니라 즉시 알아야 한다.
+    try:
+        run = KERNELS[kernel]
+    except KeyError:
+        raise ValueError(
+            f"unknown kernel {kernel!r}; expected one of {sorted(KERNELS)}"
+        ) from None
+
     results: list[PECPoint] = []
 
     for R in distances:
@@ -89,9 +112,11 @@ def _sweep(
 
         # 비교 기준. eigvalsh는 Hermitian 전용이라 일반 eig보다 빠르고
         # 정확하며, 고윳값을 오름차순으로 돌려주므로 [0]이 최솟값이다.
+        # 커널과 무관하게 항상 NumPy로 계산한다 — 이것은 VQE의 산출물이
+        # 아니라 VQE를 재는 잣대이므로 커널을 따라갈 이유가 없다.
         exact = float(np.linalg.eigvalsh(hamiltonian_matrix(H))[0])
 
-        vqe_result = run_vqe_multistart(
+        vqe_result = run(
             H,
             ansatz=ansatz,
             n_restarts=n_restarts,
@@ -124,6 +149,7 @@ def sweep_h2_distances(
     n_restarts: int = 3,
     seed: int = 42,
     verbose: bool = False,
+    kernel: str = "numpy",
 ) -> list[PECPoint]:
     """H2에 대해 R 스윕. 각 R에서 multi-start VQE 실행.
 
@@ -133,10 +159,12 @@ def sweep_h2_distances(
 
     6차원이라 3회면 충분하다. LiH와 달리 local minimum 문제가 심하지 않고,
     실패하는 지점은 R <= 0.2처럼 계수가 큰 영역에 한정된다.
+
+    kernel: "numpy"(기본) 또는 "cpp". cpp는 qudit_simulator 모듈이 필요하다.
     """
     return _sweep(
         distances, get_h2_hamiltonian, h2_ansatz_state,
-        H2_NUM_PARAMS, n_restarts, seed, verbose,
+        H2_NUM_PARAMS, n_restarts, seed, verbose, kernel,
     )
 
 
@@ -145,6 +173,7 @@ def sweep_lih_distances(
     n_restarts: int = 5,
     seed: int = 42,
     verbose: bool = False,
+    kernel: str = "numpy",
 ) -> list[PECPoint]:
     """LiH에 대해 R 스윕. 각 R에서 multi-start VQE 실행.
 
@@ -154,8 +183,10 @@ def sweep_lih_distances(
     Hamiltonian은 캐시에서 읽는다 (hamiltonian.py의 재현성 주석 참조).
     캐시 없이 돌리면 Qiskit의 ULP 비결정성 때문에 같은 seed로도 결과가
     매번 달라진다.
+
+    kernel: "numpy"(기본) 또는 "cpp". cpp는 qudit_simulator 모듈이 필요하다.
     """
     return _sweep(
         distances, get_lih_hamiltonian, lih_ansatz_state,
-        LIH_NUM_PARAMS, n_restarts, seed, verbose,
+        LIH_NUM_PARAMS, n_restarts, seed, verbose, kernel,
     )

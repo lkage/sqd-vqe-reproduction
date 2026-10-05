@@ -18,10 +18,16 @@ run_vqe_multistart가 반환하는 history는 여러 시도를 이어 붙인 것
 
 "Exact diag."는 VQE가 최적화하는 것과 동일한 4-qubit(16x16) 축소
 Hamiltonian의 최소 고윳값이다.
+
+사용법:
+    uv run python examples/figures/lih_convergence_curve.py
+    PYTHONPATH=<cpp_repo>/build-py/python \
+      uv run python examples/figures/lih_convergence_curve.py --kernel cpp
 """
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -30,29 +36,51 @@ import numpy as np
 from sqd_vqe.ansatz import LIH_NUM_PARAMS, lih_ansatz_state
 from sqd_vqe.expectation import hamiltonian_matrix
 from sqd_vqe.hamiltonian import get_lih_hamiltonian
-from sqd_vqe.vqe import run_vqe_multistart
+from sqd_vqe.vqe import run_vqe_multistart, run_vqe_multistart_cpp
 
 
 # 실측상 3회는 간혹 실패하고 5회는 항상 성공했다.
 # (examples/diagnostics/lih_vqe_landscape.py 참조)
 N_RESTARTS = 5
 
+KERNELS = {
+    "numpy": run_vqe_multistart,
+    "cpp": run_vqe_multistart_cpp,
+}
+
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--kernel", choices=sorted(KERNELS), default="numpy",
+        help="energy evaluation kernel (default: numpy). "
+             "cpp requires the qudit_simulator module on PYTHONPATH.",
+    )
+    args = parser.parse_args()
+    run = KERNELS[args.kernel]
+
+    # 파일명과 제목을 커널별로 분리한다. 같은 이름을 쓰면 나중에 돌린 쪽이
+    # 앞서 만든 그림을 덮어쓴다.
+    suffix = "" if args.kernel == "numpy" else f"_{args.kernel}"
+    kernel_note = "" if args.kernel == "numpy" else ", C++ kernel"
+
     R = 1.55  # LiH의 결합 길이. 논문 Table S2와 Fig. 4A의 기준 거리
-    print(f"Running LiH VQE at R = {R} Å (multi-start {N_RESTARTS}회)...")
+    print(f"Running LiH VQE at R = {R} Å "
+          f"(multi-start {N_RESTARTS}회, kernel: {args.kernel})...")
 
     # 캐시된 Hamiltonian을 쓴다. 캐시 없이 돌리면 Qiskit의 ULP 비결정성
     # 때문에 실행마다 다른 그림이 나온다.
     H = get_lih_hamiltonian(distance=R)
+    # 커널과 무관하게 항상 NumPy로 구한다 — VQE를 재는 잣대이기 때문이다.
     exact = float(np.linalg.eigvalsh(hamiltonian_matrix(H))[0])
-    result = run_vqe_multistart(
+    result = run(
         H, ansatz=lih_ansatz_state, n_restarts=N_RESTARTS,
         seed=42, n_params=LIH_NUM_PARAMS, max_iter=3000,
     )
 
     # best_restart_seed를 찍어 두면 그림을 다시 만들 때 어느 시도였는지
-    # 추적할 수 있다. 5회 중 몇 번째가 이겼는지도 정보가 된다.
+    # 추적할 수 있다. 커널을 바꾸면 이 값이 달라질 수도 있다 — 목적 함수가
+    # 몇 ULP 다르므로 어느 restart가 이기는지가 뒤집힐 수 있기 때문이다.
     print(f"Best restart seed: {result.best_restart_seed}")
     print(f"Converged in {result.n_iterations} function evaluations")
     print(f"Final energy: {result.energy:.6f} Hartree")
@@ -97,13 +125,13 @@ def main():
     ax1.legend(loc="center right", framealpha=0.9)
     ax1.set_title(
         rf"LiH VQE convergence at $R = {R}$ Å "
-        f"(Fig. 4A reproduction, {LIH_NUM_PARAMS} parameters)"
+        f"(Fig. 4A reproduction, {LIH_NUM_PARAMS} parameters{kernel_note})"
     )
     plt.tight_layout()
 
     out_dir = Path("results")
     out_dir.mkdir(exist_ok=True)
-    plot_path = out_dir / "lih_convergence.png"
+    plot_path = out_dir / f"lih_convergence{suffix}.png"
     plt.savefig(plot_path, dpi=150)
     print(f"\nSaved plot to {plot_path}")
 

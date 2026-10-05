@@ -13,18 +13,25 @@
 multi-start가 아니라 단일 실행을 쓴다. 이 그림의 목적은 한 번의 최적화가
 어떻게 진행되는지 보여주는 것이므로, 여러 시도 중 최선을 고르면 그 과정이
 가려진다.
+
+사용법:
+    uv run python examples/figures/h2_convergence_curve.py
+    PYTHONPATH=<cpp_repo>/build-py/python \
+      uv run python examples/figures/h2_convergence_curve.py --kernel cpp
 """
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 
+from sqd_vqe.ansatz import H2_NUM_PARAMS, h2_ansatz_state
 from sqd_vqe.expectation import hamiltonian_matrix
 from sqd_vqe.hamiltonian import get_h2_hamiltonian
-from sqd_vqe.vqe import run_vqe
+from sqd_vqe.vqe import run_vqe, run_vqe_cpp
 
 
 # 식 (5)의 파라미터 순서와 맞춘다. params[:3]이 θ, params[3:]이 ω다.
@@ -33,16 +40,40 @@ PARAM_LABELS = [
     r"$\omega_0$", r"$\omega_1$", r"$\omega_2$",
 ]
 
+#: 커널 이름 → 단일 실행 함수. sweep.py의 KERNELS와 같은 패턴이지만
+#: 이쪽은 multi-start가 아니라 단일 실행이다.
+KERNELS = {
+    "numpy": run_vqe,
+    "cpp": run_vqe_cpp,
+}
+
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--kernel", choices=sorted(KERNELS), default="numpy",
+        help="energy evaluation kernel (default: numpy). "
+             "cpp requires the qudit_simulator module on PYTHONPATH.",
+    )
+    args = parser.parse_args()
+    run = KERNELS[args.kernel]
+
+    # 파일명을 커널별로 분리한다. 같은 이름을 쓰면 나중에 돌린 쪽이
+    # 앞서 만든 그림을 덮어쓰고, README가 어느 쪽을 가리키는지도 모호해진다.
+    suffix = "" if args.kernel == "numpy" else f"_{args.kernel}"
+    # 제목에도 커널을 적는다. 그림 파일만 떼어 봐도 출처를 알 수 있어야 한다.
+    kernel_note = "" if args.kernel == "numpy" else ", C++ kernel"
+
     R = 0.73  # H2의 결합 길이. 논문 Fig. 3A도 이 지점이다
-    print(f"Running H2 VQE at R = {R} Å...")
+    print(f"Running H2 VQE at R = {R} Å  (kernel: {args.kernel})...")
 
     H = get_h2_hamiltonian(distance=R)
     # eigvalsh는 Hermitian 전용이라 고윳값을 오름차순으로 돌려준다.
-    # 따라서 [0]이 ground state energy다.
+    # 따라서 [0]이 ground state energy다. 이 값은 커널과 무관하게 항상
+    # NumPy로 구한다 — VQE의 산출물이 아니라 VQE를 재는 잣대이기 때문이다.
     exact = float(np.linalg.eigvalsh(hamiltonian_matrix(H))[0])
-    result = run_vqe(H, seed=42)
+    result = run(H, ansatz=h2_ansatz_state, seed=42,
+                 n_params=H2_NUM_PARAMS)
 
     print(f"Converged in {result.n_iterations} function evaluations")
     print(f"Final energy: {result.energy:.6f} Hartree")
@@ -94,12 +125,12 @@ def main():
                loc="center right", ncol=2, fontsize=9, framealpha=0.9)
 
     ax1.set_title(rf"$H_2$ VQE convergence at $R = {R}$ Å "
-                  "(Fig. 3A reproduction)")
+                  f"(Fig. 3A reproduction{kernel_note})")
     plt.tight_layout()
 
     out_dir = Path("results")
     out_dir.mkdir(exist_ok=True)
-    plot_path = out_dir / "h2_convergence.png"
+    plot_path = out_dir / f"h2_convergence{suffix}.png"
     # dpi=150이면 README에 임베드했을 때 선명하면서 파일이 과하게 커지지 않는다.
     plt.savefig(plot_path, dpi=150)
     print(f"\nSaved plot to {plot_path}")

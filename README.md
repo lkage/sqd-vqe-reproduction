@@ -9,7 +9,7 @@
 수행합니다. 이 레포는 그중 고전 알고리즘 쪽 — Hamiltonian 구성, 각도
 파라미터화 ansatz, COBYLA 최적화 — 을 시뮬레이션으로 재현합니다.
 
-짝 레포: [`qudit-simulator-cpp`](../qudit-simulator-cpp) — 범용 C++ qudit
+짝 레포: [`qudit-simulator-cpp`](https://github.com/lkage/qudit-simulator-cpp) — 범용 C++ qudit
 시뮬레이터. 에너지 평가 커널을 제공하며, 이 레포와 교차 검증되어 있습니다.
 
 ## 결과
